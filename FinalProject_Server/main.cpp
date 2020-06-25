@@ -46,53 +46,131 @@ char* ConnectedClientList() {
 	memset(res, 0, sizeof(res));
 
 	WaitForSingleObject(mutex, INFINITE);
+	strcat(res, "LIST ");
 	for (int i = 0; i < client_cnt; i++) {
 		strcat(res, clients[i].nickname);
-		if (i < client_cnt - 1) {
-			strcat(res, " ");
-		}
+		strcat(res, "\n");
 	}
 	ReleaseMutex(mutex);
 
 	return res;
 }
 
+/********
+ * 닉네임으로 클라이언트를 찾아, 소켓을 리턴해주는 함수
+ ********/
+SOCKET FindClientWithNickname(char nickname[]) {
+	WaitForSingleObject(mutex, INFINITE);
+	for (int i = 0; i < client_cnt; i++) {
+		if (!strcmp(clients[i].nickname, nickname)) {
+			ReleaseMutex(mutex);
+			return clients[i].sock;
+		}
+	}
+	ReleaseMutex(mutex);
+
+	return -1;
+}
+
+/********
+ * 클라이언트 핸들링 스레드 함수
+ ********/
 unsigned WINAPI HandleClient(void* arg) {
 	CLNT client = *((CLNT*)arg);
 	int msglen;
-	char msg[MAXLEN];
+	char msg[MAXLEN];  // 클라이언트로부터 최초로 오는 메시지.
+	char request_msg[MAXLEN];  // 클라이언트에 요청 보내는 메시지.
+	char response_msg[MAXLEN]; // 클라이언트로부터 요청 받는 메시지.
 
+	/**
+	 * 클라이언트로부터 오는 메시지 처리
+	 * 미리 지정된 프로토콜 (LIST, REQ, SEND, QUIT)
+	 **/
 	while ((msglen = recv(client.sock, msg, sizeof(msg), 0)) != 0) {
-		// SendMsg(msg, strLen);
-		/*
-		for (int i = 0; i < msglen; i++) {
-			printf("%c", msg[i]);
-		}
-		*/
-
-		if (!strncmp(msg, "LIST", msglen)) {
-			printf("[%s] : 사용자 리스트 요청.\n", client.nickname, msg);
+		if (!strncmp(msg, "LIST", 4)) {
+			//// 사용자 리스트 요청
+			printf("[%s] : 사용자 리스트 요청.\n", client.nickname);
 
 			char* list_str = ConnectedClientList();
 			send(client.sock, list_str, strlen(list_str), 0);
 
-			printf("[%s] : 사용자 리스트 전송 완료. \"%s\"\n", client.nickname, list_str);
+			printf("[%s] : 사용자 리스트 전송 완료.\n", client.nickname);
 		}
-		else if (!strncmp(msg, )) {
+		else if (!strncmp(msg, "REQ", 3)) {
+			//// 연결 요청
+			char dest_nickname[MAXLEN];
+			memset(dest_nickname, 0, sizeof(dest_nickname));
+			strncpy(dest_nickname, msg + 4, msglen - 4);
+			printf("[%s] : 연결 요청 -> %s\n", client.nickname, dest_nickname);
+
+			SOCKET dest_sock = FindClientWithNickname(dest_nickname);
+			if (dest_sock != -1) {
+				// 해당 닉네임의 소켓을 찾음. 해당 소켓에 연결 여부 질의.
+				memset(request_msg, 0, sizeof(request_msg));
+				sprintf(request_msg, "REQ %s", client.nickname);
+				send(dest_sock, request_msg, strlen(request_msg), 0);
+			}
+			else {
+				// 해당 닉네임의 소켓을 찾을 수 없음.
+				printf("[%s] : %s 사용자를 찾을 수 없음.\n", client.nickname, dest_nickname);
+				memset(response_msg, 0, sizeof(response_msg));
+				sprintf(response_msg, "NOTFOUND");
+				send(client.sock, response_msg, strlen(response_msg), 0);
+			}
+
+		}
+		else if (!strncmp(msg, "ACCEPT", 6)) {
+			// 연결 수락
+			char dest_nickname[MAXLEN];
+			memset(dest_nickname, 0, sizeof(dest_nickname));
+			strncpy(dest_nickname, msg + 7, msglen - 7);
+			printf("[%s] : 연결 수락 -> %s\n", client.nickname, dest_nickname);
+
+			SOCKET dest_sock = FindClientWithNickname(dest_nickname);
+			memset(request_msg, 0, sizeof(request_msg));
+			sprintf(request_msg, "ACCEPT");
+			send(dest_sock, request_msg, strlen(request_msg), 0);
+		}
+		else if (!strncmp(msg, "REJECT", 6)) {
+			// 연결 거부
 
 		}
 
-		else if (!strncmp(msg, "QUIT", msglen)) {
+		else if (!strncmp(msg, "SEND", 4)) {
 
+		}
+		else if (!strncmp(msg, "QUIT", 4)) {
+			printf("[%s] : 종료 요청.\n", client.nickname);
+			break;
 		}
 		else {
 			printf("[%s] : 이해할 수 없는 메시지 (%s)\n", client.nickname, msg);
 		}
 	}
 
-	// 연결 종료와 관련
+	/**
+	 * 연결 종료 시 처리
+	 **/
+	//// Mutex로 보호
+	WaitForSingleObject(mutex, INFINITE);
+	for (int i = 0; i < client_cnt; i++) {
+		if (client.sock == clients[i].sock) {
+			// 현재 연결 종료한 클라이언트를 clients[]에서 제거, 하나씩 앞으로 당김
+			while (i++ < client_cnt - 1) {
+				clients[i].sock = clients[i + 1].sock;
+				memset(clients[i].nickname, 0, sizeof(clients[i].nickname));
+				strcpy(clients[i].nickname, clients[i + 1].nickname);
+			}
+			break;
+		}
+	}
 
+	// client_cnt 하나 감소
+	client_cnt--;
 
+	//// Mutex 해제
+	ReleaseMutex(mutex);
+	
 	closesocket(client.sock);
 	return 0;
 }
