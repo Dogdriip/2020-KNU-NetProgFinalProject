@@ -148,6 +148,17 @@ unsigned WINAPI HandleClient(void* arg) {
 		else if (!strncmp(msg, "SEND", 4)) {
 
 		}
+		else if (!strncmp(msg, "DIS", 3)) {
+			char dest_nickname[MAXLEN];
+			memset(dest_nickname, 0, sizeof(dest_nickname));
+			strncpy(dest_nickname, msg + 4, msglen - 4);
+			printf("[%s] : 연결 종료 -> %s\n", client.nickname, dest_nickname);
+
+			SOCKET dest_sock = FindClientWithNickname(dest_nickname);
+			memset(request_msg, 0, sizeof(request_msg));
+			sprintf(request_msg, "DIS %s", client.nickname);
+			send(dest_sock, request_msg, strlen(request_msg), 0);
+		}
 		else if (!strncmp(msg, "QUIT", 4)) {
 			printf("[%s] : 종료 요청.\n", client.nickname);
 			break;

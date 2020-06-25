@@ -119,9 +119,14 @@ unsigned WINAPI WaitingRoom(void* arg) {
 			/**
 			 * state == 3 : 다른 클라이언트와 대화 중인 상황
 			 **/
-			// scanf("%s", input);
+			memset(response_msg, 0, sizeof(response_msg));
 			if (!strcmp(input, "!E") || !strcmp(input, "!e")) {
-				printf("종료\n");
+				printf("대화방을 나갑니다.\n");
+				sprintf(response_msg, "DIS %s", DEST_NICKNAME);
+				send(sock, response_msg, strlen(response_msg), 0);
+
+				state = 0;
+				printf("[대기실] 메뉴를 선택하세요. (!L : 사용자 리스트 / !R : 채팅 요청 / !Q : 종료)\n");
 			}
 			else {
 				// 일반 문자열 처리
@@ -199,10 +204,11 @@ unsigned WINAPI RecvMsg(void* arg) {
 			state = 0;
 			printf("[대기실] 메뉴를 선택하세요. (!L : 사용자 리스트 / !R : 채팅 요청 / !Q : 종료)\n");
 		}
-
+		/*
 		else {
 			printf("서버로부터 잘못된 응답을 수신했습니다.\n");
 		}
+		*/
 	}
 	return 0;
 }
