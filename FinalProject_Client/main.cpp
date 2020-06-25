@@ -41,7 +41,9 @@ unsigned WINAPI WaitingRoom(void* arg) {
 		memset(request_msg, 0, sizeof(request_msg));
 		memset(response_msg, 0, sizeof(response_msg));
 		
-		scanf("%s", input);
+		
+		fgets(input, sizeof(input), stdin);
+		input[strlen(input) - 1] = '\0';
 		
 		if (!state) {
 			/**
@@ -121,6 +123,8 @@ unsigned WINAPI WaitingRoom(void* arg) {
 			 **/
 			memset(response_msg, 0, sizeof(response_msg));
 			if (!strcmp(input, "!E") || !strcmp(input, "!e")) {
+				//// 대화 Disconnect 처리
+				// 서버에 DIS 메시지 전송 후, 
 				printf("대화방을 나갑니다.\n");
 				sprintf(response_msg, "DIS %s", DEST_NICKNAME);
 				send(sock, response_msg, strlen(response_msg), 0);
@@ -129,7 +133,11 @@ unsigned WINAPI WaitingRoom(void* arg) {
 				printf("[대기실] 메뉴를 선택하세요. (!L : 사용자 리스트 / !R : 채팅 요청 / !Q : 종료)\n");
 			}
 			else {
-				// 일반 문자열 처리
+				//// 일반 문자열 처리
+				// 메시지로 간주하고, 서버에 SEND 메시지 전송
+				sprintf(response_msg, "SEND %s %s", DEST_NICKNAME, input);
+				printf("%s\n", response_msg);
+				send(sock, response_msg, strlen(response_msg), 0);
 			}
 		}
 	}
@@ -194,7 +202,18 @@ unsigned WINAPI RecvMsg(void* arg) {
 			printf("[대기실] 메뉴를 선택하세요. (!L : 사용자 리스트 / !R : 채팅 요청 / !Q : 종료)\n");
 		}
 		else if (!strncmp(msg, "SEND", 4)) {
+			char trailer[MAXLEN];
+			memset(trailer, 0, sizeof(trailer));
+			strncpy(trailer, msg + 5, msglen - 5);
 
+			printf("[%s] ", DEST_NICKNAME);
+			char* ptr = strtok(trailer, " ");
+			ptr = strtok(NULL, " ");
+			while (ptr != NULL) {
+				printf("%s ", ptr);          // 자른 문자열 출력
+				ptr = strtok(NULL, " ");      // 다음 문자열을 잘라서 포인터를 반환
+			}
+			printf("\n");
 		}
 		else if (!strncmp(msg, "DIS", 3)) {
 			char source_nickname[MAXLEN];
@@ -237,8 +256,9 @@ int main() {
 	 **/
 	char nickname[MAXLEN];
 	memset(nickname, 0, sizeof(nickname));
-	printf("닉네임을 입력해 주세요.\n>> ");
-	scanf("%s", nickname);
+	printf("닉네임을 입력해 주세요. (공백 불가)\n");
+	fgets(nickname, sizeof(nickname), stdin);
+	nickname[strlen(nickname) - 1] = '\0';
 
 
 	/**

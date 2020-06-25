@@ -146,7 +146,24 @@ unsigned WINAPI HandleClient(void* arg) {
 		}
 
 		else if (!strncmp(msg, "SEND", 4)) {
+			char trailer[MAXLEN];
+			memset(trailer, 0, sizeof(trailer));
+			strncpy(trailer, msg + 5, msglen - 5);
+			
+			char dest_nickname[MAXLEN];
+			memset(dest_nickname, 0, sizeof(dest_nickname));
+			short int nickname_set = 0;
 
+			char* ptr = strtok(trailer, " ");
+			strcpy(dest_nickname, ptr);
+
+			printf("[%s] : ¸Þ½ÃÁö -> %s\n", client.nickname, dest_nickname);
+
+			SOCKET dest_sock = FindClientWithNickname(dest_nickname);
+			msg[msglen] = '\0';
+			memset(request_msg, 0, sizeof(request_msg));
+			sprintf(request_msg, msg);
+			send(dest_sock, request_msg, strlen(request_msg), 0);
 		}
 		else if (!strncmp(msg, "DIS", 3)) {
 			char dest_nickname[MAXLEN];
