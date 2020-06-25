@@ -19,17 +19,22 @@
 
 using namespace std;
 
-//// 구조체 정의
+
+/********
+ * 클라이언트 관리를 위한 구조체 정의
+ * {닉네임, 소켓, 연결상태(대기:0, 채팅중:1)}
+ ********/
 typedef struct CLNT {
 	char nickname[MAXLEN];
 	SOCKET sock;
+	short int status;
 } CLNT;
 
+
 //// 전역변수
-CLNT clients[MAX_CLNT];  // 클라이언트 {닉네임, 소켓} 구조체 배열
+CLNT clients[MAX_CLNT];  // CLNT 구조체 배열
 HANDLE mutex;  // MUTEX
 int client_cnt;  // 현재 연결된 클라이언트 개수
-
 
 
 /********
@@ -47,7 +52,7 @@ char* ConnectedClientList() {
 	char res[MAXLEN];
 	memset(res, 0, sizeof(res));
 
-	WaitForSingleObject(mutex, INFINITE);  // Mutex 획득 후 작업
+	WaitForSingleObject(mutex, INFINITE);  // 클라이언트 목록을 읽어오기 전에 Mutex 획득 후 작업
 	strcat(res, "LIST ");
 	for (int i = 0; i < client_cnt; i++) {
 		strcat(res, clients[i].nickname);
@@ -80,14 +85,14 @@ SOCKET FindClientWithNickname(char nickname[]) {
  ********/
 unsigned WINAPI HandleClient(void* arg) {
 	CLNT client = *((CLNT*)arg);
+	char msg[MAXLEN];  // 클라이언트로부터 최초로 받는 메시지.
 	int msglen;
-	char msg[MAXLEN];  // 클라이언트로부터 최초로 오는 메시지.
 	char request_msg[MAXLEN];  // 클라이언트에 요청 보내는 메시지.
-	char response_msg[MAXLEN]; // 클라이언트로부터 요청 받는 메시지.
+	char response_msg[MAXLEN]; // 클라이언트로부터 요청받은 메시지. (앞의 프로토콜 부분을 제외한 문자열)
 
 	/**
 	 * 클라이언트로부터 오는 메시지 처리
-	 * 미리 지정된 프로토콜 (LIST, REQ, SEND, QUIT)
+	 * 미리 약속한 프로토콜대로 메시지가 들어오게 됨
 	 **/
 	while ((msglen = recv(client.sock, msg, sizeof(msg), 0)) != 0) {
 		if (!strncmp(msg, "LIST", 4)) {
@@ -104,6 +109,7 @@ unsigned WINAPI HandleClient(void* arg) {
 			strncpy(dest_nickname, msg + 4, msglen - 4);
 			printf("[%s] : 연결 요청 -> %s\n", client.nickname, dest_nickname);
 
+			// 해당 닉네임의 소켓을 닉네임으로 검색
 			SOCKET dest_sock = FindClientWithNickname(dest_nickname);
 			if (dest_sock != -1) {
 				// 해당 닉네임의 소켓을 찾음. 해당 소켓에 연결 여부 질의.
@@ -127,6 +133,8 @@ unsigned WINAPI HandleClient(void* arg) {
 			strncpy(dest_nickname, msg + 7, msglen - 7);
 			printf("[%s] : 연결 수락 -> %s\n", client.nickname, dest_nickname);
 
+			// 연결을 요청한 클라이언트 측에 연결 수락을 알림.
+			// 두 클라이언트는 각 클라이언트 측에 의해 채팅 상태가 됨.
 			SOCKET dest_sock = FindClientWithNickname(dest_nickname);
 			memset(request_msg, 0, sizeof(request_msg));
 			sprintf(request_msg, "ACCEPT %s", client.nickname);
@@ -139,13 +147,15 @@ unsigned WINAPI HandleClient(void* arg) {
 			strncpy(dest_nickname, msg + 7, msglen - 7);
 			printf("[%s] : 연결 거부 -> %s\n", client.nickname, dest_nickname);
 
+			// 연결을 요청한 클라이언트 측에 연결 거부를 알림.
+			// 두 클라이언트는 각 클라이언트 측에 의해 대기실로 돌아가게 됨.
 			SOCKET dest_sock = FindClientWithNickname(dest_nickname);
 			memset(request_msg, 0, sizeof(request_msg));
 			sprintf(request_msg, "REJECT %s", client.nickname);
 			send(dest_sock, request_msg, strlen(request_msg), 0);
 		}
-
 		else if (!strncmp(msg, "SEND", 4)) {
+			//// 연결이 성립된 상태에서, 메시지를 주고받는 경우
 			char trailer[MAXLEN];
 			memset(trailer, 0, sizeof(trailer));
 			strncpy(trailer, msg + 5, msglen - 5);
@@ -159,6 +169,7 @@ unsigned WINAPI HandleClient(void* arg) {
 
 			printf("[%s] : 메시지 -> %s\n", client.nickname, dest_nickname);
 
+			// 상대방 측에 메시지를 전달.
 			SOCKET dest_sock = FindClientWithNickname(dest_nickname);
 			msg[msglen] = '\0';
 			memset(request_msg, 0, sizeof(request_msg));
@@ -166,21 +177,26 @@ unsigned WINAPI HandleClient(void* arg) {
 			send(dest_sock, request_msg, strlen(request_msg), 0);
 		}
 		else if (!strncmp(msg, "DIS", 3)) {
+			//// 연결이 성립된 상태에서, 한 쪽이 연결 종료(방 나가기)를 입력한 경우
 			char dest_nickname[MAXLEN];
 			memset(dest_nickname, 0, sizeof(dest_nickname));
 			strncpy(dest_nickname, msg + 4, msglen - 4);
 			printf("[%s] : 연결 종료 -> %s\n", client.nickname, dest_nickname);
 
+			// 상대방 측에 연결 종료를 알리고, 각 클라이언트는 대기실로 돌아가게 됨.
 			SOCKET dest_sock = FindClientWithNickname(dest_nickname);
 			memset(request_msg, 0, sizeof(request_msg));
 			sprintf(request_msg, "DIS %s", client.nickname);
 			send(dest_sock, request_msg, strlen(request_msg), 0);
 		}
 		else if (!strncmp(msg, "QUIT", 4)) {
+			//// 클라이언트의 종료 요청
+			// 루프문을 탈출해, 아래의 "연결 종료 시 처리"에 따르게 됨.
 			printf("[%s] : 종료 요청.\n", client.nickname);
 			break;
 		}
 		else {
+			//// 프로토콜에 어긋나는 메시지 (이런 경우는 일어나지 않음)
 			printf("[%s] : 이해할 수 없는 메시지 (%s)\n", client.nickname, msg);
 		}
 	}
@@ -188,7 +204,7 @@ unsigned WINAPI HandleClient(void* arg) {
 	/**
 	 * 연결 종료 시 처리
 	 **/
-	//// Mutex로 보호
+	// 클라이언트 목록 작업 전에 Mutex 획득 후 작업
 	WaitForSingleObject(mutex, INFINITE);
 	for (int i = 0; i < client_cnt; i++) {
 		if (client.sock == clients[i].sock) {
@@ -205,7 +221,7 @@ unsigned WINAPI HandleClient(void* arg) {
 	// client_cnt 하나 감소
 	client_cnt--;
 
-	//// Mutex 해제
+	// Mutex 해제
 	ReleaseMutex(mutex);
 	
 	closesocket(client.sock);
@@ -213,24 +229,12 @@ unsigned WINAPI HandleClient(void* arg) {
 }
 
 int main() {
-	/////////////////////////////
 	WSADATA wsaData; // for WSAStartup
 	SOCKET serv_sock;  // 서버 연결용 소켓
-	
-	SOCKADDR_IN serv_addr, clnt_addr;  // 클, 서 주소정보
-	
-	HANDLE hThread;
+	SOCKADDR_IN serv_addr, clnt_addr;  // 클라이언트, 서버 주소정보
+	HANDLE hThread;  // 클라이언트 스레드
 
-	
-
-	/////////////////////////////
 	char nickname_tmp[MAXLEN];
-
-
-	/////////////////////////////
-
-
-
 
 	/**
 	 * Winsock 초기화, Mutex 생성, 연결용 소켓 생성
@@ -244,6 +248,7 @@ int main() {
 		print_err("socket() error!");
 	}
 	printf("완료.\n");
+
 
 	/**
 	 * 서버 구성
@@ -272,34 +277,30 @@ int main() {
 		int clnt_addr_sz = sizeof(clnt_addr);
 		SOCKET tmp_sock = accept(serv_sock, (SOCKADDR*)&clnt_addr, &clnt_addr_sz);
 
-		//// 연결이 들어오면 (연결은 tmp_sock으로 수신) Mutex 획득 후 작업
+		// 연결이 들어오면 (연결은 tmp_sock으로 수신) Mutex 획득 후 작업
 		WaitForSingleObject(mutex, INFINITE);
 		
-		// 닉네임 받아오기
+		// 닉네임 입력받기
 		memset(nickname_tmp, 0, sizeof(nickname_tmp));
 		int strlen = recv(tmp_sock, nickname_tmp, sizeof(nickname_tmp), 0);
 
-		// 받아온 닉네임, 소켓 저장 후 client_cnt 증가
+		// 받아온 닉네임, 소켓을 clients(CLNT 구조체 배열)에 저장 후 client_cnt 증가
 		strcpy(clients[client_cnt].nickname, nickname_tmp);
 		clients[client_cnt].sock = tmp_sock;
 		client_cnt++;
 		
-		//// Release Mutex
+		// Mutex 반환
 		ReleaseMutex(mutex);
 		
-		// 로그 후 클라이언트 관리하는 스레드 하나 생성
+		// 로그 후, 클라이언트 관리하는 스레드 하나 생성
 		printf("클라이언트 연결됨: {%s, %s} \n", clients[client_cnt - 1].nickname, inet_ntoa(clnt_addr.sin_addr));
 		hThread = (HANDLE)_beginthreadex(NULL, 0, HandleClient, (void*)&clients[client_cnt - 1], 0, NULL);
 	}
 
 
-
-
-
-
-
-
-
+	/**
+	 * 서버 프로그램 종료
+	 **/
 	closesocket(serv_sock);
 	WSACleanup();
 
