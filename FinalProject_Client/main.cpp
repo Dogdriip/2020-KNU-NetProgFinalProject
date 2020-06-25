@@ -250,7 +250,8 @@ int main() {
 	SOCKET sock;  // 연결 생성용 소켓
 	SOCKADDR_IN serv_addr;  // 서버 연결 정보
 	HANDLE SendThread, RecvThread;  // 메시지 전송, 수신 스레드
-
+	char msg[MAXLEN];
+	int msglen;
 
 	/**
 	 * 닉네임 입력받기
@@ -290,8 +291,15 @@ int main() {
 
 	/**
 	 * 연결 후 대기실에 들어가기 전, 서버에 최초 1회 닉네임 전송
+	 * 서버에서 닉네임 중복 체크 (ERROR를 받으면 프로그램 종료)
 	 **/
 	send(sock, nickname, strlen(nickname), 0);
+	msglen = recv(sock, msg, sizeof(msg), 0);
+	msg[msglen] = '\0';
+	if (!strcmp(msg, "ERROR")) {
+		printf("서버에 이미 중복된 닉네임이 있습니다.\n프로그램을 종료합니다.\n");
+		exit(0);
+	}
 	
 	/**
 	 * 메시지 전송, 메시지 수신을 담당하는 스레드 2개를 생성

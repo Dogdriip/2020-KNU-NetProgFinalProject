@@ -284,6 +284,15 @@ int main() {
 		memset(nickname_tmp, 0, sizeof(nickname_tmp));
 		int strlen = recv(tmp_sock, nickname_tmp, sizeof(nickname_tmp), 0);
 
+		// 닉네임 중복 체크
+		if (FindClientWithNickname(nickname_tmp) != -1) {
+			send(tmp_sock, "ERROR", 5, 0);
+			continue;
+		}
+		else {
+			send(tmp_sock, "OK", 2, 0);
+		}
+
 		// 받아온 닉네임, 소켓을 clients(CLNT 구조체 배열)에 저장 후 client_cnt 증가
 		strcpy(clients[client_cnt].nickname, nickname_tmp);
 		clients[client_cnt].sock = tmp_sock;
