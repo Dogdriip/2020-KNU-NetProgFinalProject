@@ -21,58 +21,115 @@
 
 using namespace std;
 
+int state;  // 0: 대기실, 1: 채팅 요청이 들어왔거나 채팅 중
+char DEST_NICKNAME[MAXLEN];
 
+HANDLE mutex;
 
-
-/**
- * 대기실 스레드
- **/
+/********
+ * ?? 스레드 함수
+ ********/
 unsigned WINAPI WaitingRoom(void* arg) {
 	SOCKET sock = *((SOCKET*)arg);  // server socket
 	char input[MAXLEN];
 	char request_msg[MAXLEN];
 	char response_msg[MAXLEN];
-
+	
 	printf("[대기실] 메뉴를 선택하세요. (!L : 사용자 리스트 / !R : 채팅 요청 / !Q : 종료)\n");
 	while (1) {
 		memset(input, 0, sizeof(input));
 		memset(request_msg, 0, sizeof(request_msg));
 		memset(response_msg, 0, sizeof(response_msg));
-
+		
 		scanf("%s", input);
-		if (!strcmp(input, "!L") || !strcmp(input, "!l")) {
-			//// 사용자 리스트
-			// request_msg = "LIST" 서버에 전송
-			sprintf(request_msg, "LIST");
-			send(sock, request_msg, strlen(request_msg), 0);
-		}
-		else if (!strcmp(input, "!R") || !strcmp(input, "!r")) {
-			//// 채팅 요청
-			// 대상 닉네임 입력
-			char dest_nickname[MAXLEN];
-			memset(dest_nickname, 0, sizeof(dest_nickname));
-			printf("대상 닉네임을 입력하세요.\n");
-			scanf("%s", dest_nickname);
+		
+		if (!state) {
+			/**
+			 * state == 0 : 대기실에서 대기 중인 상황
+			 **/
 			
-			// request_msg = "REQ 사용자명" 서버에 전송
-			sprintf(request_msg, "REQ %s", dest_nickname);
-			send(sock, request_msg, strlen(request_msg), 0);
-			
-			// 전송 후 "요청 중..." 메시지 표시, 서버로부터 메시지 대기
-			printf("요청 중...\n");
+			if (!strcmp(input, "!L") || !strcmp(input, "!l")) {
+				//// 사용자 리스트
+				// request_msg = "LIST" 서버에 전송
+				sprintf(request_msg, "LIST");
+				send(sock, request_msg, strlen(request_msg), 0);
+			}
+			else if (!strcmp(input, "!R") || !strcmp(input, "!r")) {
+				//// 채팅 요청
+				// 대상 닉네임 입력
+				memset(DEST_NICKNAME, 0, sizeof(DEST_NICKNAME));
+				printf("대상 닉네임을 입력하세요.\n");
+				scanf("%s", DEST_NICKNAME);
+
+				// request_msg = "REQ 사용자명" 서버에 전송
+				sprintf(request_msg, "REQ %s", DEST_NICKNAME);
+				send(sock, request_msg, strlen(request_msg), 0);
+
+				// 전송 후 "요청 중..." 메시지 표시, 서버로부터 메시지 대기
+				printf("요청 중...\n");
+				state = 2;
+			}
+			else if (!strcmp(input, "!Q") || !strcmp(input, "!q")) {
+				//// 종료
+				// request_msg = "QUIT" 서버에 전송
+				sprintf(request_msg, "QUIT");
+				send(sock, request_msg, strlen(request_msg), 0);
+				printf("서버와의 연결이 종료되었습니다.\n");
+				exit(0);
+			}
+			else {
+				printf("잘못된 메뉴입니다. 다시 입력하세요.\n");
+			}
 		}
-		else if (!strcmp(input, "!Q") || !strcmp(input, "!q")) {
-			//// 종료
-			// request_msg = "QUIT" 서버에 전송
-			sprintf(request_msg, "QUIT");
-			send(sock, request_msg, strlen(request_msg), 0);
-			printf("서버와의 연결이 종료되었습니다.\n");
-			exit(0);
+		else if (state == 1) {
+			/**
+			 * state == 1 : 클라이언트에 연결 요청이 들어온 상황
+			 **/
+			// scanf("%s", input);
+			if (!strcmp(input, "!Y") || !strcmp(input, "!y")) {
+				//// 연결 수락
+				// 서버에 상대방 닉네임과 함께 ACCEPT 보내고, state = 3로 변경
+				memset(response_msg, 0, sizeof(response_msg));
+				sprintf(response_msg, "ACCEPT %s", DEST_NICKNAME);
+				send(sock, response_msg, strlen(response_msg), 0);
+				state = 3;
+				printf("[%s]님과 대화를 시작합니다. (!E : 종료)\n", DEST_NICKNAME);
+			}
+			else if (!strcmp(input, "!N") || !strcmp(input, "!n")) {
+				//// 연결 거부
+				// 서버에 상대방 닉네임과 함께 REJECT 보내고, state = 0으로 변경
+				memset(response_msg, 0, sizeof(response_msg));
+				sprintf(response_msg, "REJECT %s", DEST_NICKNAME);
+				send(sock, response_msg, strlen(response_msg), 0);
+				printf("[%s]님의 요청을 거부했습니다.\n", DEST_NICKNAME);
+				state = 0;
+				printf("[대기실] 메뉴를 선택하세요. (!L : 사용자 리스트 / !R : 채팅 요청 / !Q : 종료)\n");
+			}
+			else {
+				printf("잘못된 메뉴입니다. 다시 입력하세요.\n");
+			}
 		}
-		else {
-			printf("잘못된 메뉴입니다. 다시 입력하세요.\n");
+		else if (state == 2) {
+			/**
+			 * state == 2 : 요청을 보낸 후 대기 중인 상황
+			 **/
+			continue;
+		}
+		else if (state == 3) {
+			/**
+			 * state == 3 : 다른 클라이언트와 대화 중인 상황
+			 **/
+			// scanf("%s", input);
+			if (!strcmp(input, "!E") || !strcmp(input, "!e")) {
+				printf("종료\n");
+			}
+			else {
+				// 일반 문자열 처리
+			}
 		}
 	}
+
+	
 
 	return 0;
 }
@@ -85,75 +142,63 @@ unsigned WINAPI RecvMsg(void* arg) {
 
 	char input[MAXLEN];
 	char msg[MAXLEN];
-	char res[MAXLEN];
 	char response_msg[MAXLEN];
 	int msglen;
 	while (1) {
 		msglen = recv(sock, msg, sizeof(msg), 0);
-		memset(res, 0, sizeof(res));
-		strncpy(res, msg, msglen);
-
-		printf("RECEIVED: %s\n", res);
+		msg[msglen] = '\0';
 		
-		if (!strncmp(res, "REQ", 3)) {
+		if (!strncmp(msg, "REQ", 3)) {
 			// 클라이언트에게 연결요청이 들어온 경우
+			// REQ 뒤의 닉네임을 받아서 전역변수 DEST_NICKNAME에 저장
 			char source_nickname[MAXLEN];
 			memset(source_nickname, 0, sizeof(source_nickname));
-			strncpy(source_nickname, res + 4, msglen - 4);
-
-			printf("[%s]님으로부터 대화요청이 도착했습니다. (!Y : 수락, !N : 거절)\n", source_nickname);
-			while (1) {
-				memset(input, 0, sizeof(input));
-				scanf("%s", input);
-				if (!strcmp(input, "!Y") || !strcmp(input, "!y")) {
-					memset(response_msg, 0, sizeof(response_msg));
-					sprintf(response_msg, "ACCEPT");
-					send(sock, response_msg, strlen(response_msg), 0);
-				}
-				else if (!strcmp(input, "!N") || !strcmp(input, "!n")) {
-					memset(response_msg, 0, sizeof(response_msg));
-					sprintf(response_msg, "REJECT");
-					send(sock, response_msg, strlen(response_msg), 0);
-				}
-				else {
-					printf("잘못된 메뉴입니다. 다시 입력하세요.\n");
-				}
-			}
+			strcpy(source_nickname, msg + 4);
 			
+			strcpy(DEST_NICKNAME, source_nickname);
+			
+			state = 1;
+			printf("[%s]님으로부터 대화요청이 도착했습니다. (!Y : 수락 / !N : 거절)\n", DEST_NICKNAME);
 		}
-		else if (!strncmp(res, "LIST", 4)) {
+		else if (!strncmp(msg, "LIST", 4)) {
 			// 서버로부터 오는 공백으로 구분된 리스트 문자열 수신 후 출력
 			printf("------------------------\n[사용자 리스트]\n");
-			printf("%s", res + 5);
+			printf("%s", msg + 5);
 			printf("------------------------\n");
+			printf("[대기실] 메뉴를 선택하세요. (!L : 사용자 리스트 / !R : 채팅 요청 / !Q : 종료)\n");
 		}
-		else if (!strncmp(res, "NOTFOUND", 7)) {
+		else if (!strncmp(msg, "NOTFOUND", 7)) {
 			printf("해당 사용자를 찾을 수 없습니다.\n");
+			state = 0;
+			printf("[대기실] 메뉴를 선택하세요. (!L : 사용자 리스트 / !R : 채팅 요청 / !Q : 종료)\n");
 		}
-		else if (!strncmp(res, "ACCEPT", 6)) {
-			printf("성공");
+		else if (!strncmp(msg, "ACCEPT", 6)) {
+			char source_nickname[MAXLEN];
+			memset(source_nickname, 0, sizeof(source_nickname));
+			strcpy(source_nickname, msg + 7);
+			printf("[%s]님이 대화 요청을 수락했습니다.\n", source_nickname);
+			state = 3;
+			printf("[%s]님과 대화를 시작합니다. (!E : 종료)\n", source_nickname);
 		}
-		else if (!strncmp(res, "REJECT", 6)) {
+		else if (!strncmp(msg, "REJECT", 6)) {
+			char source_nickname[MAXLEN];
+			memset(source_nickname, 0, sizeof(source_nickname));
+			strcpy(source_nickname, msg + 7);
+			printf("[%s]님이 대화 요청을 거부했습니다.\n", source_nickname);
+			state = 0;
+			printf("[대기실] 메뉴를 선택하세요. (!L : 사용자 리스트 / !R : 채팅 요청 / !Q : 종료)\n");
+		}
+		else if (!strncmp(msg, "SEND", 4)) {
 
 		}
-		else if (!strncmp(res, "SEND", 4)) {
-
+		else if (!strncmp(msg, "DIS", 3)) {
+			char source_nickname[MAXLEN];
+			memset(source_nickname, 0, sizeof(source_nickname));
+			strcpy(source_nickname, msg + 4);
+			printf("[%s]님이 대화방을 나갔습니다.\n", source_nickname);
+			state = 0;
+			printf("[대기실] 메뉴를 선택하세요. (!L : 사용자 리스트 / !R : 채팅 요청 / !Q : 종료)\n");
 		}
-
-		/*
-			else if (!strncmp(response_msg, "ACCEPT", strlen)) {
-				printf("[%s]님이 대화 요청을 수락했습니다. (!E : 종료)", dest_nickname);
-				while (1) {
-
-				}
-
-
-			}
-			else if (!strncmp(response_msg, "REJECT", strlen)) {
-				printf("[%s]님이 대화 요청을 거부했습니다.\n", dest_nickname);
-			}*/
-
-
 
 		else {
 			printf("서버로부터 잘못된 응답을 수신했습니다.\n");

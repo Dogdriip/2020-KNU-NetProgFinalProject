@@ -11,53 +11,56 @@
 #include <winsock2.h>
 #include <windows.h>
 #include <process.h> 
-
 #pragma comment(lib, "Ws2_32.lib")
 
 #define MAXLEN 1001
 #define MAX_CLNT 101
 #define SERV_PORT 12345
 
-
 using namespace std;
 
+//// 구조체 정의
 typedef struct CLNT {
 	char nickname[MAXLEN];
 	SOCKET sock;
 } CLNT;
 
+//// 전역변수
 CLNT clients[MAX_CLNT];  // 클라이언트 {닉네임, 소켓} 구조체 배열
 HANDLE mutex;  // MUTEX
 int client_cnt;  // 현재 연결된 클라이언트 개수
 
 
 
-
+/********
+ * 에러 출력용 함수
+ ********/
 void print_err(const char s[]) {
 	fprintf(stderr, s);
 	printf("\n");
 }
 
-
-
-
+/********
+ * 현재 접속 중인 사용자 닉네임 목록을 문자열로 리턴해주는 함수
+ ********/
 char* ConnectedClientList() {
 	char res[MAXLEN];
 	memset(res, 0, sizeof(res));
 
-	WaitForSingleObject(mutex, INFINITE);
+	WaitForSingleObject(mutex, INFINITE);  // Mutex 획득 후 작업
 	strcat(res, "LIST ");
 	for (int i = 0; i < client_cnt; i++) {
 		strcat(res, clients[i].nickname);
 		strcat(res, "\n");
 	}
-	ReleaseMutex(mutex);
+	ReleaseMutex(mutex);  // Mutex 반환
 
 	return res;
 }
 
 /********
  * 닉네임으로 클라이언트를 찾아, 소켓을 리턴해주는 함수
+ * 해당 닉네임이 없을 경우 -1 리턴
  ********/
 SOCKET FindClientWithNickname(char nickname[]) {
 	WaitForSingleObject(mutex, INFINITE);
@@ -90,10 +93,8 @@ unsigned WINAPI HandleClient(void* arg) {
 		if (!strncmp(msg, "LIST", 4)) {
 			//// 사용자 리스트 요청
 			printf("[%s] : 사용자 리스트 요청.\n", client.nickname);
-
 			char* list_str = ConnectedClientList();
 			send(client.sock, list_str, strlen(list_str), 0);
-
 			printf("[%s] : 사용자 리스트 전송 완료.\n", client.nickname);
 		}
 		else if (!strncmp(msg, "REQ", 3)) {
@@ -106,6 +107,7 @@ unsigned WINAPI HandleClient(void* arg) {
 			SOCKET dest_sock = FindClientWithNickname(dest_nickname);
 			if (dest_sock != -1) {
 				// 해당 닉네임의 소켓을 찾음. 해당 소켓에 연결 여부 질의.
+				printf("[%s] : %s 사용자를 찾음. 수락 여부 대기 중...\n", client.nickname, dest_nickname);
 				memset(request_msg, 0, sizeof(request_msg));
 				sprintf(request_msg, "REQ %s", client.nickname);
 				send(dest_sock, request_msg, strlen(request_msg), 0);
@@ -117,10 +119,9 @@ unsigned WINAPI HandleClient(void* arg) {
 				sprintf(response_msg, "NOTFOUND");
 				send(client.sock, response_msg, strlen(response_msg), 0);
 			}
-
 		}
 		else if (!strncmp(msg, "ACCEPT", 6)) {
-			// 연결 수락
+			//// 상대방 측에서 연결 수락한 경우
 			char dest_nickname[MAXLEN];
 			memset(dest_nickname, 0, sizeof(dest_nickname));
 			strncpy(dest_nickname, msg + 7, msglen - 7);
@@ -128,12 +129,20 @@ unsigned WINAPI HandleClient(void* arg) {
 
 			SOCKET dest_sock = FindClientWithNickname(dest_nickname);
 			memset(request_msg, 0, sizeof(request_msg));
-			sprintf(request_msg, "ACCEPT");
+			sprintf(request_msg, "ACCEPT %s", client.nickname);
 			send(dest_sock, request_msg, strlen(request_msg), 0);
 		}
 		else if (!strncmp(msg, "REJECT", 6)) {
-			// 연결 거부
+			//// 상대방 측에서 연결 거부한 경우
+			char dest_nickname[MAXLEN];
+			memset(dest_nickname, 0, sizeof(dest_nickname));
+			strncpy(dest_nickname, msg + 7, msglen - 7);
+			printf("[%s] : 연결 거부 -> %s\n", client.nickname, dest_nickname);
 
+			SOCKET dest_sock = FindClientWithNickname(dest_nickname);
+			memset(request_msg, 0, sizeof(request_msg));
+			sprintf(request_msg, "REJECT %s", client.nickname);
+			send(dest_sock, request_msg, strlen(request_msg), 0);
 		}
 
 		else if (!strncmp(msg, "SEND", 4)) {
